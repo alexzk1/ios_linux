@@ -4,6 +4,7 @@
 #run this 2nd, it will generate crosscompiler for host platform, which 
 #will build for iOS based on SDK from 1st step
 
+#sdk file made by 1st step from out xcode.dmg
 sdk_file=iPhoneOS8.4.sdk.tar.xz
 
 set +e
