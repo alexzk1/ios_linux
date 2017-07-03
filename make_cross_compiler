@@ -1,0 +1,35 @@
+#!/bin/bash
+
+#based on http://docs.godotengine.org/en/stable/reference/cross-compiling_for_ios_on_linux.html
+#run this 2nd, it will generate crosscompiler for host platform, which 
+#will build for iOS based on SDK from 1st step
+
+sdk_file=iPhoneOS8.4.sdk.tar.xz
+
+set +e
+rm -rf iostools/usr
+rm -rf cctools-port
+set -e
+
+if [ -f $sdk_file ]
+then
+  
+  [ ! -d "cctools-port" ] && git clone https://github.com/tpoechtrager/cctools-port.git
+  
+  dir=$(pwd)
+  
+  cd cctools-port/usage_examples/ios_toolchain  
+  #according to https://i.stack.imgur.com/OMo1R.jpg I think minimal is iOS5 supported by this SDK
+  export IPHONEOS_DEPLOYMENT_TARGET=5.0
+  ./build.sh $dir/$sdk_file armv7 
+  cd $dir
+  
+  mkdir -p $dir/iostools/usr
+  cp -r $dir/cctools-port/usage_examples/ios_toolchain/target/bin $dir/iostools/usr
+  cp -r $dir/cctools-port/usage_examples/ios_toolchain/target/libexec $dir/iostools/usr
+  cp -r $dir/cctools-port/usage_examples/ios_toolchain/target/SDK $dir/iostools/usr
+    
+else
+  echo "iPhoneOS.sdk.tar.xz is absent, please launch 'prepare_ios_sdk' script."
+  exit 1
+fi

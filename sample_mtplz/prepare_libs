@@ -1,0 +1,224 @@
+#!/bin/bash
+#please, manually set path to folder which initially contains "make_cross_compiler" script
+IOS_BASE_TOOLS=/home/alex/Work/cross_ios
+
+#comment to build full boost which is needed if main project has "tests" enabled, otherwise short is enough to make it
+FAST_BOOST=1
+
+dir=$(pwd)
+
+
+#too low versions like 1.36 use different config method based on ./configure so incompotible with this script
+BOOST_VERSION=1.58.0
+IOS_TOOLS=$IOS_BASE_TOOLS/iostools/usr
+IOS_SYSROOT=$IOS_TOOLS/SDK
+
+
+IOS_COMPILER=$IOS_TOOLS/bin/arm-apple-darwin11-clang
+IOS_PREPROC="$IOS_COMPILER -E"
+IOS_LIPO=$IOS_TOOLS/bin/arm-apple-darwin11-lipo
+IOS_LIBTOOL=$IOS_TOOLS/bin/arm-apple-darwin11-libtool
+
+#from https://gist.github.com/faithfracture/c629ae4c7168216a9856
+#min version should be no less then prepared compiler
+MIN_IOS_VERSION=5.0
+# The EXTRA_CPPFLAGS definition works around a thread race issue in
+# shared_ptr. I encountered this historically and have not verified that
+# the fix is no longer required. Without using the posix thread primitives
+# an invalid compare-and-swap ARM instruction (non-thread-safe) was used for the
+# shared_ptr use count causing nasty and subtle bugs.
+#
+# Should perhaps also consider/use instead: -BOOST_SP_USE_PTHREADS
+#
+IOS_EXTRA_CPPFLAGS="-g -DNDEBUG -fexceptions -std=c++11 -stdlib=libc++ -DBOOST_AC_USE_PTHREADS -DBOOST_SP_USE_PTHREADS"
+EXTRA_IOS_CPPFLAGS="$IOS_EXTRA_CPPFLAGS -mios-version-min=$MIN_IOS_VERSION"
+
+function recreate_dir() {
+ [ -d $1 ] && rm -rf $1
+ mkdir -p $1
+}
+
+function recreate_dir2() {
+   recreate_dir $1/include
+   recreate_dir $1/lib
+}
+
+#params: arch filename
+function ios_test_lib_arch() {
+  test_command="$IOS_LIPO -info $2"
+  resp_test=$($test_command)
+  echo $test_command
+  echo "Test-iOS response: $resp_test"
+  [[ $resp_test != *"$1"* ]] && echo "iOS build failed $1" && exit 1  
+  echo PASSED: $2 is ok for $1
+}
+
+#params: filename
+function ios_test_lib() {
+  ios_test_lib_arch armv7 $1
+  ios_test_lib_arch arm64 $1   
+  echo "Both arches are passed for iOS"
+}
+
+function each_link() {
+  for file in $1/*; do
+  bfn=$2/$(basename $file)
+  [ -f $bfn ] && unlink $bfn
+  [ -L $bfn ] && unlink $bfn
+  ln -s $file $bfn
+  done
+}
+
+function each_link2() {
+  each_link $1/include $2/include 
+  each_link $1/lib $2/lib 
+  echo ''
+}
+
+if [ -f $IOS_COMPILER ] 
+then
+   echo "Found iOS cross compiler"
+else
+   echo "Please edit '$0' script and point IOS_BASE_TOOLS to the folder where initial 'make_cross_compiler' script was placed"
+   exit 1
+fi
+
+recreate_dir2 $dir/libs/ios_arm/usr
+recreate_dir2 $dir/libs/andr_arm/usr
+recreate_dir2 $dir/libs/andr_arm64/usr
+
+
+#**********************************************xz************************************
+if [ ! -d xz ] 
+then
+    git clone http://git.tukaani.org/xz.git
+    cd xz
+    ./autogen.sh        
+    cd ..
+fi  
+
+function build_xz_for_arch_ios() {
+   cd $dir/xz
+   xz_out=$dir/xz/ios/$1
+   echo $xz_out
+   
+   recreate_dir $xz_out
+   
+   [ -f ./conf.cache ] && unlink ./conf.cache
+   
+   CC=$IOS_COMPILER CPP=$IOS_PREPROC CPPFLAGS="-arch $1 -stdlib=libc++" \
+  ./configure --disable-rpath --enable-fast-install=no --prefix="$xz_out" --exec_prefix="$xz_out" --disable-doc --disable-lzma-links --disable-scripts \
+  --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-lzma-links --enable-shared=no --host=arm \
+  --enable-encoders=arm,lzma1,lzma2,delta,armthumb --enable-decoders=arm,lzma1,lzma2,delta,armthumb
+  
+   make -j 7 
+   PREFIX=$xz_out make install
+   make clean 
+   
+   ios_test_lib_arch $1 $xz_out/lib/liblzma.a
+   cd $dir
+}
+
+build_xz_for_arch_ios arm64
+build_xz_for_arch_ios armv7
+#joining 2 files in "fat"
+$IOS_LIPO $dir/xz/ios/armv7/lib/liblzma.a $dir/xz/ios/arm64/lib/liblzma.a -create -output $dir/libs/ios_arm/usr/lib/liblzma.a
+ios_test_lib $dir/libs/ios_arm/usr/lib/liblzma.a
+cp -r $dir/xz/ios/armv7/include/* $dir/libs/ios_arm/usr/include/
+
+#**********************************************eigen - just make proper links, no compilation is needed
+
+cd $dir
+[ ! -d eigen ] && hg clone https://bitbucket.org/eigen/eigen/
+ln -s $dir/eigen $dir/libs/ios_arm/usr/include/eigen
+ln -s $dir/eigen $dir/libs/andr_arm/usr/include/eigen
+ln -s $dir/eigen $dir/libs/andr_arm64/usr/include/eigen
+
+#**********************************************boost
+
+BOOST_VERSION2="${BOOST_VERSION//./_}"
+BOOST_DIR=$dir/boost_$BOOST_VERSION2
+BOOST_TARBALL=$dir/boost_$BOOST_VERSION2.tar.bz2
+
+
+
+cd $dir
+if [ ! -d $BOOST_DIR ]
+then
+ if [ ! -s $BOOST_TARBALL ]; then
+        echo "Downloading boost ${BOOST_VERSION}"
+        curl -L -o $BOOST_TARBALL \
+            http://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION}/boost_${BOOST_VERSION2}.tar.bz2/download
+ fi
+ echo Unpacking boost... 
+ tar xfj $BOOST_TARBALL 
+ cd $BOOST_DIR
+ ./bootstrap.sh
+ cd ..
+fi
+
+#linking boost versioned, so cmake can find it
+ver_boost="usr/include/boost-$BOOST_VERSION2" 
+
+[ ! -d $dir/libs/ios_arm/$ver_boost ] && mkdir $dir/libs/ios_arm/$ver_boost
+[ ! -d $dir/libs/andr_arm/$ver_boost ] && mkdir $dir/libs/andr_arm/$ver_boost
+[ ! -d $dir/libs/andr_arm64/$ver_boost ] && mkdir $dir/libs/andr_arm64/$ver_boost
+ln -s $BOOST_DIR/boost $dir/libs/ios_arm/$ver_boost/boost
+ln -s $BOOST_DIR/boost $dir/libs/andr_arm/$ver_boost/boost
+ln -s $BOOST_DIR/boost $dir/libs/andr_arm64/$ver_boost/boost
+
+
+#DEBUG PART - REMOVE THAT
+#putting libs to "sysroot", ignoring possible already exists links
+#cp -r $BOOST_DIR/iphone-build/stage/* $dir/libs/ios_arm/usr/
+#set +e
+#each_link2 $dir/libs/ios_arm/usr $IOS_TOOLS/SDK/usr
+#set -e
+#exit
+
+#END DEBUG PART
+
+cd $BOOST_DIR
+fn=$BOOST_DIR/tools/build/src/user-config.jam
+
+[ -f $fn ] && unlink $fn
+[ -d "iphone-build" ] && rm -rf iphone-build
+
+#generating boost build config file (1 for all should be, androids, ios, etc)
+cat > $fn <<- EOM
+using darwin : iphone 
+: $IOS_COMPILER -arch armv7 -arch arm64 -arch armv7s $EXTRA_IOS_CPPFLAGS
+: <architecture>arm <target-os>iphone <archiver>$IOS_LIBTOOL 
+;
+
+EOM
+
+
+set +e
+if [ $FAST_BOOST ] 
+then
+#fast minimal boost build without tests
+./bjam -j 7 --reconfigure --build-dir=iphone-build --stagedir=iphone-build/stage --with-system --with-program_options --with-thread --with-chrono toolset=darwin architecture=arm target-os=iphone define=_LITTLE_ENDIAN link=static runtime-link=shared stage
+else
+#full boost build
+bjam -j 7 --reconfigure --build-dir=iphone-build --stagedir=iphone-build/stage toolset=darwin architecture=arm target-os=iphone define=_LITTLE_ENDIAN link=static runtime-link=shared stage
+fi
+set -e
+
+cd $BOOST_DIR/iphone-build/stage/lib/
+for file in *; do 
+  bfn=$(basename $file)
+  tfn=$bfn.$BOOST_VERSION
+  cp $file $dir/libs/ios_arm/usr/lib/$tfn
+  ln -s -r $dir/libs/ios_arm/usr/lib/$tfn $dir/libs/ios_arm/usr/lib/$bfn
+done
+
+
+cd $dir
+#testing compilation
+ios_test_lib $dir/libs/ios_arm/usr/lib/libboost_system.a
+
+echo Linking all to $IOS_SYSROOT
+set +e
+each_link2 $dir/libs/ios_arm/usr $IOS_SYSROOT/usr
+set -e

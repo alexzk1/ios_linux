@@ -1,0 +1,47 @@
+#!/bin/bash
+#run this 1st once
+#based on http://docs.godotengine.org/en/stable/reference/cross-compiling_for_ios_on_linux.html
+
+#source file containing xcode, must be downloaded elsewhere
+dmg_file=Xcode_6.4.dmg
+#need manually set proper sdk version from inside dmg
+sdk_ver=8.4
+set +e
+rm -rf ./iPhoneSDK
+unlink iPhoneOS$sdk_ver.sdk.tar.xz
+set -e
+
+if [ -f $dmg_file ]
+then
+  echo "Found Xcode"
+  
+  echo "Going to make dmg reader"
+  [ ! -d "darling-dmg" ] && git clone https://github.com/darlinghq/darling-dmg.git
+  cd darling-dmg
+  [ ! -d "build" ] && mkdir build
+  cd build
+  cmake .. -DCMAKE_BUILD_TYPE=Release
+  make -j 7  # The number is the amount of cores your processor has, for faster build
+  cd ../..
+  
+  echo "Preparing SDK..."
+  [ ! -d "xcode" ] && mkdir xcode
+  ./darling-dmg/build/darling-dmg $dmg_file xcode
+  mkdir -p iPhoneSDK/iPhoneOS.sdk
+  cp -r xcode/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/* iPhoneSDK/iPhoneOS.sdk
+  cp -r xcode/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include/c++/* iPhoneSDK/iPhoneOS.sdk/usr/include/c++
+  
+  fusermount -u xcode  # unmount the image  
+  rm -rf ./darling-dmg
+  rm -rf ./xcode
+  
+  
+  cd iPhoneSDK
+  tar -cf - * | xz -9 -c - > ../iPhoneOS$sdk_ver.sdk.tar.xz
+  cd ..
+  
+  
+else
+  echo "Please download manually $dmg_file to current folder following http://stackoverflow.com/questions/10335747/how-to-download-xcode-4-5-6-7-8-and-get-the-dmg-or-xip-file"
+  exit 1
+fi

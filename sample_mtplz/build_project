@@ -1,0 +1,64 @@
+#!/bin/bash
+
+#please, manually set path to folder which initially contains "make_cross_compiler" script
+IOS_BASE_TOOLS=/home/alex/Work/cross_ios
+IOS_TOOLS=$IOS_BASE_TOOLS/iostools/usr
+
+function recreate_dir() {
+ [ -d $1 ] && rm -rf $1
+ mkdir -p $1
+}
+
+function recreate_dir2() {
+   recreate_dir $1/include
+   recreate_dir $1/lib
+}
+
+function recreate_dir3() {
+  recreate_dir2 $1
+  recreate_dir $1/bin
+}
+
+set -e
+
+dir=$(pwd)
+IOS_FINAL=$dir/final_result/ios
+recreate_dir $IOS_FINAL
+
+#this is my repo with C++ fixes, you should clone it to yourself and change link here
+[ ! -d "mtplz" ] && git clone https://github.com/alexzk1/mtplz.git
+
+function set_ios_arch() {
+fn=$dir/ios_arch.cmake
+[ -f $fn ] && unlink $fn
+cat > $fn <<- EOM
+set(IOS_ARCH $1)
+EOM
+
+}
+
+function build_ios_for_arch() {
+   cd $dir
+   recreate_dir mtplz_ios   
+   cd   mtplz_ios
+
+   set_ios_arch $1
+   cmake -DEIGEN3_ROOT=usr/include/eigen -DCMAKE_TOOLCHAIN_FILE=$dir/ios_toolchan.cmake -DFILE_FOLDER=$dir ../mtplz
+
+   echo 'Building for macos, log goes to file'
+   #make VERBOSE=1 -j 7
+   make -j 7
+   recreate_dir3 $IOS_FINAL/$1
+   cp -r ./bin/* $IOS_FINAL/$1/bin
+   cp -r ./lib/* $IOS_FINAL/$1/lib
+}
+
+
+build_ios_for_arch armv7
+build_ios_for_arch arm64
+
+cd $dir
+[ -d "mtplz_ios" ] && rm -rf mtplz_ios
+[ -f ios_arch.cmake ] && unlink ios_arch.cmake
+
+
