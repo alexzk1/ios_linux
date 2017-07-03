@@ -31,6 +31,6 @@ then
   cp -r $dir/cctools-port/usage_examples/ios_toolchain/target/SDK $dir/iostools/usr
     
 else
-  echo "iPhoneOS.sdk.tar.xz is absent, please launch 'prepare_ios_sdk' script."
+  echo "$sdk_file is absent, please launch 'prepare_ios_sdk' script."
   exit 1
 fi
