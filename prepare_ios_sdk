@@ -4,7 +4,7 @@
 
 #source file containing xcode, must be downloaded elsewhere
 dmg_file=Xcode_6.4.dmg
-#need manually set proper sdk version from inside dmg
+#ATTENTION!: need manually set PROPER sdk version from inside dmg
 sdk_ver=8.4
 set +e
 rm -rf ./iPhoneSDK
